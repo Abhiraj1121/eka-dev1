@@ -324,7 +324,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus('thinking');
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch('https://eka-dev1.onrender.com/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
