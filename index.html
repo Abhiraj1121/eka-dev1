@@ -12,13 +12,112 @@
 </head>
 <body class="dark">
 
-  <!-- Particle canvas background -->
   <canvas id="bgCanvas"></canvas>
+
+  <!-- ══ SETTINGS MODAL ══ -->
+  <div class="modal-overlay" id="settingsOverlay">
+    <div class="modal" id="settingsModal">
+      <div class="modal-header">
+        <span class="modal-title">⚙️ Settings</span>
+        <button class="modal-close" id="settingsClose">✕</button>
+      </div>
+      <div class="modal-body">
+
+        <div class="setting-group">
+          <div class="setting-label">🎨 Theme</div>
+          <div class="theme-grid">
+            <button class="theme-swatch active" data-theme="dark" title="Dark Gold">
+              <span class="swatch-preview dark-gold"></span>Dark Gold
+            </button>
+            <button class="theme-swatch" data-theme="light" title="Light">
+              <span class="swatch-preview light-cream"></span>Light
+            </button>
+            <button class="theme-swatch" data-theme="purple" title="Purple Night">
+              <span class="swatch-preview purple-night"></span>Purple Night
+            </button>
+            <button class="theme-swatch" data-theme="grid" title="Black Grid">
+              <span class="swatch-preview black-grid"></span>Black Grid
+            </button>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">🔊 Voice</div>
+          <div class="setting-row">
+            <span>Mute voice output</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="settingMute" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <span>Language</span>
+            <select id="settingLang" class="setting-select">
+              <option value="auto">Auto detect</option>
+              <option value="en">English</option>
+              <option value="hi">हिंदी</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">🌐 Web Search</div>
+          <div class="setting-row">
+            <span>Enable web search</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="settingWeb" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ USER PROFILE MODAL ══ -->
+  <div class="modal-overlay" id="userOverlay">
+    <div class="modal" id="userModal">
+      <div class="modal-header">
+        <span class="modal-title">👤 Your Profile</span>
+        <button class="modal-close" id="userClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="user-avatar-wrap">
+          <div class="user-avatar-big" id="userAvatarBig">?</div>
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">Display Name</div>
+          <input type="text" class="setting-input" id="profileName" placeholder="Enter your name…" maxlength="32" />
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">Gmail Address</div>
+          <input type="email" class="setting-input" id="profileEmail" placeholder="you@gmail.com" maxlength="64" />
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">About Me <span style="color:var(--text3);font-size:11px;">(optional)</span></div>
+          <input type="text" class="setting-input" id="profileAbout" placeholder="e.g. Student, Developer, Curious mind…" maxlength="60" />
+        </div>
+        <button class="save-btn" id="saveProfile">Save Profile</button>
+        <p class="profile-note">Stored locally in your browser. Never sent to any server.</p>
+      </div>
+    </div>
+  </div>
 
   <div class="app">
 
     <!-- ═══ SIDEBAR ═══ -->
     <aside class="sidebar" id="sidebar">
+
+      <!-- User card at top -->
+      <div class="user-card" id="userCardBtn">
+        <div class="user-avatar" id="userAvatarSmall">?</div>
+        <div class="user-info">
+          <div class="user-name" id="sidebarUserName">Guest User</div>
+          <div class="user-email" id="sidebarUserEmail">Tap to set up profile</div>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.4"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </div>
 
       <!-- Brand -->
       <div class="brand">
@@ -57,8 +156,12 @@
         <p class="history-empty" id="historyEmpty">No conversations yet</p>
       </div>
 
-      <!-- Actions -->
+      <!-- Bottom actions -->
       <div class="sidebar-actions">
+        <button id="openSettings" class="action-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
         <button id="clearHistory" class="action-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.96"/></svg>
           Clear History
@@ -78,7 +181,6 @@
     <!-- ═══ MAIN CHAT ═══ -->
     <main class="chat-area">
 
-      <!-- Listening glow ring -->
       <div id="listeningAnimation" class="listening-animation" style="display:none">
         <div class="glow-ring">
           <div class="ripple"></div>
@@ -87,16 +189,13 @@
         </div>
       </div>
 
-      <!-- Header -->
-      <header class="chat-header">
+      <!-- Header — position:fixed handled in CSS -->
+      <header class="chat-header" id="chatHeader">
         <div class="header-left">
-          <!-- Mobile sidebar toggle -->
           <button class="icon-btn sidebar-toggle" id="sidebarToggle" title="Menu">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
-          <div class="header-avatar">
-            <div class="ha-emblem">✦</div>
-          </div>
+          <div class="header-avatar"><div class="ha-emblem">✦</div></div>
           <div>
             <div class="header-name">EKA</div>
             <div class="header-status" id="headerStatus">
@@ -106,23 +205,18 @@
         </div>
 
         <div class="header-actions">
-          <!-- Web Search Toggle -->
           <button id="webToggle" class="icon-btn" title="Web Search (OFF)" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
               <path d="M12 2a15.3 15.3 0 0 1 0 20M12 2a15.3 15.3 0 0 0 0 20"/>
             </svg>
           </button>
-
-          <!-- Mute Toggle -->
           <button id="muteToggle" class="icon-btn" title="Mute voice" aria-pressed="false">
             <svg id="muteIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
               <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
             </svg>
           </button>
-
-          <!-- Voice only -->
           <button id="voiceOnlyToggle" class="icon-btn" title="Voice-only mode" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -130,15 +224,11 @@
               <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
             </svg>
           </button>
-
-          <!-- Language -->
           <select id="languageToggle" title="Language" class="lang-select">
             <option value="auto">Auto</option>
             <option value="en">English</option>
             <option value="hi">हिंदी</option>
           </select>
-
-          <!-- Theme -->
           <button id="themeToggle" class="icon-btn" title="Toggle theme">
             <svg id="themeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="5"/>
@@ -151,7 +241,6 @@
         </div>
       </header>
 
-      <!-- Voice-only wake button -->
       <button id="wakeMicButton" class="wake-mic" title="Tap to speak" style="display:none">
         <div class="wake-pulse"></div>
         <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -161,10 +250,8 @@
         </svg>
       </button>
 
-      <!-- Chat messages -->
       <section id="chat" class="chat"></section>
 
-      <!-- Composer -->
       <div class="composer-wrap">
         <div class="composer" id="composer">
           <button id="mic" class="mic-btn" title="Voice input">
