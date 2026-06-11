@@ -1,191 +1,260 @@
-import os
-import json
-import requests
+"""
+EKA AI — app.py  v3
+Real-time web: DuckDuckGo (free, no key) + Wikipedia
+Models: Llama 4 Maverick → Scout → Qwen3 → Mistral (all free via OpenRouter)
+"""
+
+import os, re, time, logging, requests
+from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 from flask_cors import CORS
 
-# Load environment variables
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+log = logging.getLogger("eka")
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 CORS(app)
 
-AI_API_URL = os.getenv("AI_API_URL")
-AI_API_KEY = os.getenv("AI_API_KEY")
+AI_API_URL = os.getenv("AI_API_URL", "https://openrouter.ai/api/v1/chat/completions")
+AI_API_KEY = os.getenv("AI_API_KEY", "")
+BOT_NAME   = os.getenv("BOT_NAME", "EKA")
+DEV_NAME   = os.getenv("DEV_NAME", "Abhi Raj Singh and Binod Soren")
 
-# Load local Q&A
-LOCAL_QA_PATH = os.path.join(os.path.dirname(__file__), "data", "school_data.txt")
-local_qa = {}
-if os.path.exists(LOCAL_QA_PATH):
-    with open(LOCAL_QA_PATH, "r", encoding="utf-8") as f:
-        content = f.read().strip()
-        if content:
-            entries = content.split("\n\n")
-            for entry in entries:
-                lines = [l.strip() for l in entry.splitlines() if l.strip()]
-                if len(lines) >= 2:
-                    q = lines[0].lower()
-                    a = " ".join(lines[1:])
-                    local_qa[q] = a
+# ── Model waterfall (all free tier) ──
+MODELS = [
+    {"id": "google/gemma-4-31b-it:free",       "max_tokens": 900,  "temp": 0.65},
+    {"id": "meta-llama/llama-3.3-70b-instruct:free",           "max_tokens": 900,  "temp": 0.65},
+    {"id": "nvidia/nemotron-3.5-content-safety:free",               "max_tokens": 800,  "temp": 0.60},
+    {"id": "poolside/laguna-xs.2:free",      "max_tokens": 700,  "temp": 0.60},
+    {"id": "google/gemma-3-27b-it:free",              "max_tokens": 700,  "temp": 0.65},
+]
 
-def local_lookup(query):
-    if not query:
-        return None
-    return local_qa.get(query.lower().strip())
+# ── System prompts ──
+SYS_BASE = f"""You are {BOT_NAME}, a smart helpful AI built by {DEV_NAME} in India 🇮🇳.
+Be direct — lead with the answer. No filler phrases like "Great question!".
+Use markdown: **bold** for key terms, code blocks for code, bullet lists for steps.
+Match the user's language (Hindi if they write Hindi, Hinglish if mixed).
+Today: {datetime.now().strftime("%d %B %Y")}."""
 
-# --------------------------
-# Wikipedia Web Search
-# --------------------------
-def fetch_wikipedia_summary(query):
+SYS_WEB = f"""You are {BOT_NAME}, a smart helpful AI built by {DEV_NAME} in India 🇮🇳.
+Web search results are provided below. Use them to give an accurate answer.
+Synthesise naturally — don't just copy. Add context from your knowledge where helpful.
+End with: *Source: [source name]*
+Today: {datetime.now().strftime("%d %B %Y")}.
+
+WEB RESULTS:
+{{web_content}}"""
+
+
+# ══════════════════════════════════════
+# WEB SEARCH — DuckDuckGo (free, no key)
+# Uses the DDG Instant Answer API
+# ══════════════════════════════════════
+def ddg_search(query: str) -> tuple[str | None, str]:
+    """DuckDuckGo Instant Answer API — completely free, no key needed."""
     try:
-        # Step 1: search Wikipedia
-        search_url = "https://en.wikipedia.org/w/api.php"
-        search_params = {
-            "action": "query",
-            "list": "search",
-            "srsearch": query,
-            "format": "json",
-            "utf8": 1
-        }
-
-        search_res = requests.get(
-            search_url,
-            params=search_params,
-            timeout=8,
-            headers={"User-Agent": "EKA/1.0"}
+        r = requests.get(
+            "https://api.duckduckgo.com/",
+            params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
+            headers={"User-Agent": f"{BOT_NAME}AI/3.0"},
+            timeout=6,
         )
-        search_data = search_res.json()
-        search_results = search_data.get("query", {}).get("search", [])
-        if not search_results:
-            return None
-
-        page_title = search_results[0]["title"]
-
-        # Step 2: get summary
-        summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{page_title}"
-        summary_res = requests.get(
-            summary_url,
-            timeout=8,
-            headers={"User-Agent": "EKA/1.0"}
-        )
-        if summary_res.status_code != 200:
-            return None
-
-        summary_data = summary_res.json()
-        return summary_data.get("extract")
-
+        d = r.json()
+        # Try best answer first, then abstract, then definition
+        for key in ("Answer", "AbstractText", "Definition"):
+            val = d.get(key, "").strip()
+            if val and len(val) > 40:
+                src = d.get("AbstractSource") or d.get("DefinitionSource") or "DuckDuckGo"
+                return val[:1200], src
+        # RelatedTopics fallback
+        topics = d.get("RelatedTopics", [])
+        snippets = []
+        for t in topics[:4]:
+            if isinstance(t, dict) and t.get("Text"):
+                snippets.append(t["Text"])
+        if snippets:
+            return "\n".join(snippets)[:1200], "DuckDuckGo"
     except Exception as e:
-        print("Wiki error:", e)
-        return None
+        log.warning(f"DDG error: {e}")
+    return None, ""
 
-# --------------------------
-# AI helper
-# --------------------------
-def _extract_text_from_choice(choice):
-    if not choice or not isinstance(choice, dict):
-        return None
-    # OpenAI / OpenRouter style
-    message = choice.get("message")
-    if isinstance(message, dict) and "content" in message:
-        return message["content"].strip()
-    # Older / fallback format
-    text = choice.get("text")
-    if isinstance(text, str) and text.strip():
-        return text.strip()
-    return None
 
-def _call_model(body, headers, timeout=30):
+def wikipedia_search(query: str) -> tuple[str | None, str]:
+    """Wikipedia full-extract API."""
     try:
-        resp = requests.post(AI_API_URL, headers=headers, json=body, timeout=timeout)
-        try:
-            return resp.status_code, resp.json()
-        except Exception:
-            return resp.status_code, resp.text
-    except requests.exceptions.ReadTimeout:
-        return None, "timeout"
+        # Step 1: search
+        sr = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={"action": "query", "list": "search", "srsearch": query,
+                    "format": "json", "srlimit": 2, "utf8": 1},
+            headers={"User-Agent": f"{BOT_NAME}AI/3.0"}, timeout=7,
+        ).json()
+        results = sr.get("query", {}).get("search", [])
+        if not results:
+            return None, ""
+        title = results[0]["title"]
+
+        # Step 2: extract
+        er = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={"action": "query", "titles": title, "prop": "extracts",
+                    "exintro": True, "explaintext": True, "format": "json"},
+            headers={"User-Agent": f"{BOT_NAME}AI/3.0"}, timeout=7,
+        ).json()
+        pages = er.get("query", {}).get("pages", {})
+        extract = next(iter(pages.values()), {}).get("extract", "").strip()
+        if extract:
+            return extract[:1400] + f"\n— Wikipedia: {title}", "Wikipedia"
     except Exception as e:
-        return None, str(e)
+        log.warning(f"Wikipedia error: {e}")
+    return None, ""
 
-def ai_query(user_input, history=None, system_note=None):
-    if not AI_API_URL or not AI_API_KEY:
-        return "EKA: AI backend not configured. Please set AI_API_URL and AI_API_KEY."
 
-    system_note = system_note or (
-        'You are EKA, a smart and friendly AI assistant developed by Abhi Raj. Your goal is to help users with their questions in a clear and engaging way.'
-        'Make conversations feel smooth and humanic.'
-    )
+def web_search(query: str) -> tuple[str | None, str]:
+    """Try DDG first (faster), then Wikipedia."""
+    content, src = ddg_search(query)
+    if content:
+        return content, src
+    return wikipedia_search(query)
 
-    messages = [{"role": "system", "content": system_note}]
-    if history and isinstance(history, list):
-        for m in history[-12:]:
-            if m.get("role") in ("user", "assistant") and "content" in m:
+
+# ══════════════════════════════════════
+# RESPONSE CLEANING
+# ══════════════════════════════════════
+def clean(text: str) -> str:
+    if not text:
+        return ""
+    # Strip internal <think> blocks some models emit
+    text = re.sub(r"<think(?:ing)?>.*?</think(?:ing)?>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # Strip self-labelling prefix
+    text = re.sub(r"^(EKA\s*:\s*|Eka\s*:\s*|Assistant\s*:\s*)", "", text, flags=re.IGNORECASE)
+    # Remove stray XML tags
+    text = re.sub(r"</?[a-zA-Z_][^>]{0,50}>", "", text)
+    # Collapse 3+ blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+# ══════════════════════════════════════
+# AI CORE
+# ══════════════════════════════════════
+def ai_query(user_input: str, history: list = None, system: str = None) -> str:
+    if not AI_API_KEY:
+        return "AI backend not configured. Please set AI_API_KEY in your .env file."
+
+    messages = [{"role": "system", "content": system or SYS_BASE}]
+
+    if history:
+        for m in history[-16:]:
+            if m.get("role") in ("user", "assistant") and m.get("content"):
                 messages.append({"role": m["role"], "content": m["content"]})
+
     messages.append({"role": "user", "content": user_input})
 
-    headers = {"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {AI_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://eka-dev1.onrender.com",
+        "X-Title": f"{BOT_NAME} AI",
+    }
 
-    primary_body = {"model": "meta-llama/llama-3.3-70b-instruct:free", "messages": messages, "max_tokens": 800, "temperature": 0.2}
-    fallback_body = {"model": "nvidia/nemotron-3-ultra-550b-a55b:free", "messages": messages, "max_tokens": 600, "temperature": 0.2}
+    for model in MODELS:
+        try:
+            t0   = time.time()
+            body = {"model": model["id"], "messages": messages,
+                    "max_tokens": model["max_tokens"], "temperature": model["temp"]}
+            resp = requests.post(AI_API_URL, headers=headers, json=body, timeout=35)
+            log.info(f"  {model['id']} → {resp.status_code} ({round(time.time()-t0,2)}s)")
 
-    status, result = _call_model(primary_body, headers)
-    if status is None or status >= 400:
-        # fallback AI
-        status2, result2 = _call_model(fallback_body, headers)
-        if status2 == 200:
-            choice = result2.get("choices", [{}])[0]
-            return _extract_text_from_choice(choice) or "EKA: Backup AI responded unexpectedly."
-        if status2 is None and result2 == "timeout":
-            return "EKA: AI server timeout. Try again shortly."
-        return f"EKA: AI error {status2}: {result2}"
+            if resp.status_code == 200:
+                data   = resp.json()
+                choice = (data.get("choices") or [{}])[0]
+                text   = (choice.get("message") or {}).get("content", "").strip()
+                if text:
+                    return clean(text)
+                log.warning(f"  Empty reply from {model['id']}")
 
-    if status == 200 and isinstance(result, dict):
-        choice = result.get("choices", [{}])[0]
-        return _extract_text_from_choice(choice) or "EKA: AI responded unexpectedly."
+            elif resp.status_code == 429:
+                log.warning(f"  Rate-limited on {model['id']}, trying next…")
+                time.sleep(0.4)
 
-    return "EKA: Unexpected AI error."
+            elif 400 <= resp.status_code < 500:
+                log.warning(f"  Client error {resp.status_code}, skipping {model['id']}")
 
-# --------------------------
-# Routes
-# --------------------------
+        except requests.exceptions.Timeout:
+            log.warning(f"  Timeout on {model['id']}")
+        except Exception as e:
+            log.error(f"  Error on {model['id']}: {e}")
+
+    return "All AI models are temporarily unavailable. Please try again shortly."
+
+
+# ══════════════════════════════════════
+# QUICK REPLIES (no AI cost)
+# ══════════════════════════════════════
+def quick_reply(text: str) -> str | None:
+    t = text.lower().strip().rstrip("?!.,")
+    greetings = {"hi","hello","hey","namaste","namaskar","hola","yo","hii","hai","hyy","good morning","good evening","good night","good afternoon"}
+    if t in greetings:
+        return f"Hey! 👋 I'm **{BOT_NAME}**, your AI assistant built in India 🇮🇳. What can I help you with?"
+
+    identity = re.search(r"\b(who are you|your name|what are you|introduce yourself|aap kaun|tumhara naam|kaun ho)\b", t)
+    if identity:
+        return f"I'm **{BOT_NAME}** — an AI assistant built by **{DEV_NAME}** in India 🇮🇳. I can help with questions, code, writing, analysis, and more. Ask away!"
+
+    return None
+
+
+# ══════════════════════════════════════
+# ROUTES
+# ══════════════════════════════════════
 @app.route("/")
 def index():
-    return render_template("index.html", bot_name="EKA")
+    return render_template("index.html")
+
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    payload = request.json or {}
-    msg = payload.get("message", "").strip()
-    history = payload.get("history", [])
-    use_web = payload.get("wiki", False)
+    payload  = request.get_json(silent=True) or {}
+    user_msg = (payload.get("message") or "").strip()
+    history  = payload.get("history", [])
+    use_web  = payload.get("wiki", False)
 
-    if not msg:
-        return jsonify({"reply": "EKA: Your message seems empty.", "source": "system"})
+    if not user_msg:
+        return jsonify({"reply": "Your message seems empty. What would you like to ask?", "source": "system"})
 
-    # Check local QA
-    local = local_lookup(msg)
-    if local:
-        return jsonify({"reply": local, "source": "local"})
+    log.info(f"→ {user_msg[:80]}")
 
-    # Web info from Wikipedia
+    # Quick path
+    quick = quick_reply(user_msg)
+    if quick:
+        return jsonify({"reply": quick, "source": "system"})
+
+    # Web search path
     if use_web:
-        web_summary = fetch_wikipedia_summary(msg)
-        if web_summary:
-            system_note = (
-                f"You are EKA, an AI assistant. Use the following web information:\n\n"
-                f"{web_summary}\n\n"
-                "Answer naturally."
-            )
-            reply = ai_query(msg, history=history, system_note=system_note)
-            return jsonify({"reply": reply, "source": "web+ai"})
+        content, src = web_search(user_msg)
+        if content:
+            system = SYS_WEB.replace("{web_content}", content)
+            reply  = ai_query(user_msg, history=history, system=system)
+            log.info(f"← web+ai [{src}]: {reply[:60]}")
+            return jsonify({"reply": reply, "source": "web+ai", "web_source": src})
 
-    # Regular AI fallback
-    reply = ai_query(msg, history=history)
+    # Standard AI
+    reply = ai_query(user_msg, history=history)
+    log.info(f"← ai: {reply[:60]}")
     return jsonify({"reply": reply, "source": "ai"})
 
-# --------------------------
-# Main
-# --------------------------
+
+@app.route("/api/health")
+def health():
+    return jsonify({"status": "ok", "bot": BOT_NAME,
+                    "models": [m["id"] for m in MODELS],
+                    "time": datetime.now().isoformat()})
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run(debug=True, host="0.0.0.0", port=port)
+    log.info(f"Starting {BOT_NAME} AI on :{port}")
+    app.run(debug=os.getenv("DEBUG","true").lower()=="true", host="0.0.0.0", port=port)
